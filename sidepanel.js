@@ -8,6 +8,7 @@ const connectionText = document.getElementById('connectionText');
 const btnStart = document.getElementById('btnStart');
 const btnStop = document.getElementById('btnStop');
 const btnExport = document.getElementById('btnExport');
+const btnExportSheets = document.getElementById('btnExportSheets');
 const btnReset = document.getElementById('btnReset');
 const statLeads = document.getElementById('statLeads');
 const statEmails = document.getElementById('statEmails');
@@ -15,6 +16,19 @@ const terminalLog = document.getElementById('terminalLog');
 const logStatus = document.getElementById('logStatus');
 const previewList = document.getElementById('previewList');
 const previewPlaceholder = document.getElementById('previewPlaceholder');
+const sheetWebhookUrl = document.getElementById('sheetWebhookUrl');
+
+// Load saved Webhook URL from local storage
+chrome.storage.local.get(['webhookUrl'], (result) => {
+  if (result.webhookUrl) {
+    sheetWebhookUrl.value = result.webhookUrl;
+  }
+});
+
+// Auto-save Webhook URL on modification
+sheetWebhookUrl.addEventListener('input', () => {
+  chrome.storage.local.set({ webhookUrl: sheetWebhookUrl.value });
+});
 
 // Helper: Append log line to terminal view
 function log(msg, type = 'info') {
@@ -164,6 +178,7 @@ btnReset.addEventListener('click', () => {
   previewPlaceholder.style.display = 'block';
   previewList.appendChild(previewPlaceholder);
   btnExport.disabled = true;
+  btnExportSheets.disabled = true;
   terminalLog.innerHTML = '';
   log("Dashboard reset complete. Ready to scrape.", "info");
 });
@@ -208,6 +223,44 @@ function escapeCSVValue(val) {
   return `"${str}"`;
 }
 
+// Export leads to Google Sheets via Apps Script Webhook
+btnExportSheets.addEventListener('click', () => {
+  const url = sheetWebhookUrl.value.trim();
+  if (!url) {
+    log('Please configure a Google Sheets Webhook URL first.', 'warn');
+    return;
+  }
+  if (!url.startsWith('https://script.google.com/')) {
+    log('Invalid Webhook URL. Must start with https://script.google.com/', 'error');
+    return;
+  }
+  if (scrapedLeads.length === 0) return;
+
+  btnExportSheets.disabled = true;
+  btnExportSheets.innerHTML = '<span>⏳</span> Exporting...';
+  log('Exporting data to Google Sheets...', 'info');
+
+  fetch(url, {
+    method: 'POST',
+    mode: 'no-cors', // Bypasses CORS headers requirements on Apps Script redirects
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(scrapedLeads)
+  })
+  .then(() => {
+    // Under mode: 'no-cors', response body is opaque, but completing indicates success
+    log(`Pushed ${scrapedLeads.length} leads to Google Sheets successfully!`, 'success');
+  })
+  .catch(error => {
+    log(`Google Sheets export failed: ${error.message}`, 'error');
+  })
+  .finally(() => {
+    btnExportSheets.disabled = false;
+    btnExportSheets.innerHTML = '<span>📊</span> Export to Google Sheets';
+  });
+});
+
 // Add new lead and initiate email scraper
 function handleNewLead(lead) {
   // Prevent duplicate items
@@ -229,6 +282,7 @@ function handleNewLead(lead) {
   // Update leads count
   statLeads.textContent = scrapedLeads.length;
   btnExport.disabled = false;
+  btnExportSheets.disabled = false;
   
   // Hide preview placeholder
   previewPlaceholder.style.display = 'none';
