@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "G-Maps Lead Scraper & Email Finder",
+  "version": "1.0.0",
+  "description": "Scrapes business listings from Google Maps search results, finds emails, and exports to CSV.",
+  "permissions": [
+    "sidePanel",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://www.google.com/maps/*",
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Open G-Maps Scraper Side Panel"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  }
+}
