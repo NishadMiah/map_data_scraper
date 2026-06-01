@@ -16,19 +16,6 @@ const terminalLog = document.getElementById('terminalLog');
 const logStatus = document.getElementById('logStatus');
 const previewList = document.getElementById('previewList');
 const previewPlaceholder = document.getElementById('previewPlaceholder');
-const sheetWebhookUrl = document.getElementById('sheetWebhookUrl');
-
-// Load saved Webhook URL from local storage
-chrome.storage.local.get(['webhookUrl'], (result) => {
-  if (result.webhookUrl) {
-    sheetWebhookUrl.value = result.webhookUrl;
-  }
-});
-
-// Auto-save Webhook URL on modification
-sheetWebhookUrl.addEventListener('input', () => {
-  chrome.storage.local.set({ webhookUrl: sheetWebhookUrl.value });
-});
 
 // Helper: Append log line to terminal view
 function log(msg, type = 'info') {
@@ -223,43 +210,110 @@ function escapeCSVValue(val) {
   return `"${str}"`;
 }
 
-// Export leads to Google Sheets via Apps Script Webhook
+// Export leads to Google Sheets via Google Sheets API (OAuth2)
 btnExportSheets.addEventListener('click', () => {
-  const url = sheetWebhookUrl.value.trim();
-  if (!url) {
-    log('Please configure a Google Sheets Webhook URL first.', 'warn');
-    return;
-  }
-  if (!url.startsWith('https://script.google.com/')) {
-    log('Invalid Webhook URL. Must start with https://script.google.com/', 'error');
-    return;
-  }
   if (scrapedLeads.length === 0) return;
 
   btnExportSheets.disabled = true;
-  btnExportSheets.innerHTML = '<span>⏳</span> Exporting...';
-  log('Exporting data to Google Sheets...', 'info');
+  btnExportSheets.innerHTML = '<span>⏳</span> Authorizing...';
+  log('Requesting access to your Google Account Sheets...', 'info');
 
-  fetch(url, {
-    method: 'POST',
-    mode: 'no-cors', // Bypasses CORS headers requirements on Apps Script redirects
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(scrapedLeads)
-  })
-  .then(() => {
-    // Under mode: 'no-cors', response body is opaque, but completing indicates success
-    log(`Pushed ${scrapedLeads.length} leads to Google Sheets successfully!`, 'success');
-  })
-  .catch(error => {
-    log(`Google Sheets export failed: ${error.message}`, 'error');
-  })
-  .finally(() => {
-    btnExportSheets.disabled = false;
-    btnExportSheets.innerHTML = '<span>📊</span> Export to Google Sheets';
+  // 1. Get OAuth2 Access Token from Chrome
+  chrome.identity.getAuthToken({ interactive: true }, (token) => {
+    if (chrome.runtime.lastError) {
+      log(`Google Auth failed: ${chrome.runtime.lastError.message}`, 'error');
+      log(`Please make sure you have configured your OAuth Client ID in manifest.json.`, 'warn');
+      resetExportSheetsButton();
+      return;
+    }
+
+    if (!token) {
+      log('Authentication failed or returned empty token.', 'error');
+      resetExportSheetsButton();
+      return;
+    }
+
+    log('Successfully authenticated. Creating new spreadsheet in Google Drive...', 'success');
+    btnExportSheets.innerHTML = '<span>⏳</span> Creating Sheet...';
+
+    const dateStr = new Date().toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
+    const sheetTitle = `G-Maps Leads - ${dateStr}`;
+
+    // 2. Create a new Google Spreadsheet
+    fetch('https://sheets.googleapis.com/v4/spreadsheets', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        properties: {
+          title: sheetTitle
+        }
+      })
+    })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`Spreadsheet creation failed with HTTP ${response.status}`);
+      }
+      return response.json();
+    })
+    .then(spreadsheet => {
+      const spreadsheetId = spreadsheet.spreadsheetId;
+      const spreadsheetUrl = spreadsheet.spreadsheetUrl;
+      log(`Spreadsheet created successfully! ID: ${spreadsheetId}`, 'success');
+      btnExportSheets.innerHTML = '<span>⏳</span> Appending rows...';
+
+      // 3. Prepare dataset
+      const headerRow = ['Name', 'Phone', 'Website', 'Emails', 'Maps URL'];
+      const valueRows = scrapedLeads.map(lead => [
+        lead.name || '',
+        lead.phone || 'N/A',
+        lead.website || 'N/A',
+        Array.isArray(lead.emails) ? lead.emails.join(', ') : 'N/A',
+        lead.mapsUrl || ''
+      ]);
+      const allValues = [headerRow, ...valueRows];
+
+      // 4. Append data rows to sheet
+      return fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/A1:append?valueInputOption=USER_ENTERED`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          values: allValues
+        })
+      })
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`Data write failed with HTTP ${response.status}`);
+        }
+        return response.json();
+      })
+      .then(() => {
+        log(`Pushed ${scrapedLeads.length} leads to your Google Sheet!`, 'success');
+        log('Opening spreadsheet in new tab...', 'info');
+
+        // 5. Open spreadsheet in a new tab
+        chrome.tabs.create({ url: spreadsheetUrl });
+      });
+    })
+    .catch(error => {
+      log(`Google Sheets API Error: ${error.message}`, 'error');
+      console.error(error);
+    })
+    .finally(() => {
+      resetExportSheetsButton();
+    });
   });
 });
+
+function resetExportSheetsButton() {
+  btnExportSheets.disabled = false;
+  btnExportSheets.innerHTML = '<span>📊</span> Export to Google Sheets';
+}
 
 // Add new lead and initiate email scraper
 function handleNewLead(lead) {
