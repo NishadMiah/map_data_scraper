@@ -7,8 +7,7 @@
     "sidePanel",
     "activeTab",
     "scripting",
-    "storage",
-    "identity"
+    "storage"
   ],
   "host_permissions": [
     "https://www.google.com/maps/*",
@@ -23,11 +22,5 @@
   },
   "side_panel": {
     "default_path": "sidepanel.html"
-  },
-  "oauth2": {
-    "client_id": "34750823602-b48ht3b1s4paouv2hgpt7lqmo5tfuid2.apps.googleusercontent.com",
-    "scopes": [
-      "https://www.googleapis.com/auth/spreadsheets"
-    ]
   }
 }

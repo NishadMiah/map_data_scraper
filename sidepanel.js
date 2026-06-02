@@ -181,12 +181,12 @@ btnExport.addEventListener('click', () => {
   
   for (const lead of scrapedLeads) {
     const row = [
-      escapeCSVValue(lead.name),
-      escapeCSVValue(lead.phone),
-      escapeCSVValue(lead.website),
+      escapeCSVValue(escapeForSpreadsheet(lead.name)),
+      escapeCSVValue(escapeForSpreadsheet(lead.phone) || 'N/A'),
+      escapeCSVValue(escapeForSpreadsheet(lead.website)),
       escapeCSVValue(lead.emails.join('; ')),
-      escapeCSVValue(lead.address),
-      escapeCSVValue(lead.mapsUrl)
+      escapeCSVValue(escapeForSpreadsheet(lead.address)),
+      escapeCSVValue(escapeForSpreadsheet(lead.mapsUrl))
     ];
     csvRows.push(row.join(','));
   }
@@ -214,6 +214,17 @@ function escapeCSVValue(val) {
   return `"${str}"`;
 }
 
+// Helper to escape values that can be interpreted as formulas in spreadsheets
+function escapeForSpreadsheet(val) {
+  if (val == null) return '';
+  const str = String(val);
+  // Prefix with a single quote if starts with =, +, -, or @
+  if (/^[=+\-@]/.test(str)) {
+    return "'" + str;
+  }
+  return str;
+}
+
 // Export leads to offline Excel file (.xls)
 btnExportExcel.addEventListener('click', () => {
   if (scrapedLeads.length === 0) return;
@@ -232,12 +243,12 @@ btnExportExcel.addEventListener('click', () => {
   html += `<tbody>`;
   for (const lead of scrapedLeads) {
     html += `<tr>`;
-    html += `<td>${escapeHtml(lead.name)}</td>`;
-    html += `<td>${escapeHtml(lead.phone || 'N/A')}</td>`;
-    html += `<td>${escapeHtml(lead.website || 'N/A')}</td>`;
+    html += `<td>${escapeHtml(escapeForSpreadsheet(lead.name))}</td>`;
+    html += `<td>${escapeHtml(escapeForSpreadsheet(lead.phone) || 'N/A')}</td>`;
+    html += `<td>${escapeHtml(escapeForSpreadsheet(lead.website) || 'N/A')}</td>`;
     html += `<td>${escapeHtml(lead.emails.join(', ') || 'N/A')}</td>`;
-    html += `<td>${escapeHtml(lead.address || 'N/A')}</td>`;
-    html += `<td>${escapeHtml(lead.mapsUrl || '')}</td>`;
+    html += `<td>${escapeHtml(escapeForSpreadsheet(lead.address) || 'N/A')}</td>`;
+    html += `<td>${escapeHtml(escapeForSpreadsheet(lead.mapsUrl) || '')}</td>`;
     html += `</tr>`;
   }
   html += `</tbody></table></body></html>`;
@@ -267,110 +278,64 @@ function escapeHtml(text) {
     .replace(/'/g, '&#039;');
 }
 
-// Export leads to Google Sheets via Google Sheets API (OAuth2)
-btnExportSheets.addEventListener('click', () => {
+// Export leads to Google Sheets (Clipboard-copy & Launch sheets.new)
+btnExportSheets.addEventListener('click', async () => {
   if (scrapedLeads.length === 0) return;
 
   btnExportSheets.disabled = true;
-  btnExportSheets.innerHTML = '<span>⏳</span> Authorizing...';
-  log('Requesting access to your Google Account Sheets...', 'info');
+  btnExportSheets.innerHTML = '<span>⏳</span> Copying...';
+  log('Formatting data and copying to clipboard...', 'info');
 
-  // 1. Get OAuth2 Access Token from Chrome
-  chrome.identity.getAuthToken({ interactive: true }, (token) => {
-    if (chrome.runtime.lastError) {
-      log(`Google Auth failed: ${chrome.runtime.lastError.message}`, 'error');
-      log(`Please make sure you have configured your OAuth Client ID in manifest.json.`, 'warn');
-      resetExportSheetsButton();
-      return;
-    }
+  try {
+    // 1. Format the data as Tab-Separated Values (TSV)
+    const headers = ['Name', 'Phone', 'Website', 'Emails', 'Address', 'Maps Link'];
+    const rows = [headers.join('\t')];
 
-    if (!token) {
-      log('Authentication failed or returned empty token.', 'error');
-      resetExportSheetsButton();
-      return;
-    }
-
-    log('Successfully authenticated. Creating new spreadsheet in Google Drive...', 'success');
-    btnExportSheets.innerHTML = '<span>⏳</span> Creating Sheet...';
-
-    const dateStr = new Date().toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
-    const sheetTitle = `G-Maps Leads - ${dateStr}`;
-
-    // 2. Create a new Google Spreadsheet
-    fetch('https://sheets.googleapis.com/v4/spreadsheets', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        properties: {
-          title: sheetTitle
-        }
-      })
-    })
-    .then(response => {
-      if (!response.ok) {
-        throw new Error(`Spreadsheet creation failed with HTTP ${response.status}`);
+    // Helper to escape values that could be interpreted as formulas in Sheets
+    const escapeForSheets = (val) => {
+      let str = String(val);
+      // Prefix with a single quote if starts with =, +, -, or @
+      if (/^[=+\-@]/.test(str)) {
+        str = "'" + str;
       }
-      return response.json();
-    })
-    .then(spreadsheet => {
-      const spreadsheetId = spreadsheet.spreadsheetId;
-      const spreadsheetUrl = spreadsheet.spreadsheetUrl;
-      log(`Spreadsheet created successfully! ID: ${spreadsheetId}`, 'success');
-      btnExportSheets.innerHTML = '<span>⏳</span> Appending rows...';
+      // Replace any tabs or newlines to keep TSV structure intact
+      return str.replace(/\t/g, ' ').replace(/\r?\n/g, ' ').trim();
+    };
 
-      // 3. Prepare dataset
-      const headerRow = ['Name', 'Phone', 'Website', 'Emails', 'Address', 'Maps URL'];
-      const valueRows = scrapedLeads.map(lead => [
-        lead.name || '',
-        lead.phone || 'N/A',
-        lead.website || 'N/A',
-        Array.isArray(lead.emails) ? lead.emails.join(', ') : 'N/A',
-        lead.address || 'N/A',
-        lead.mapsUrl || ''
-      ]);
-      const allValues = [headerRow, ...valueRows];
+    for (const lead of scrapedLeads) {
+      const row = [
+        escapeForSheets(lead.name || ''),
+        escapeForSheets(lead.phone || ''),
+        escapeForSheets(lead.website || ''),
+        escapeForSheets(Array.isArray(lead.emails) ? lead.emails.join('; ') : ''),
+        escapeForSheets(lead.address || ''),
+        escapeForSheets(lead.mapsUrl || '')
+      ];
+      rows.push(row.join('\t'));
+    }
 
-      // 4. Append data rows to sheet
-      return fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/A1:append?valueInputOption=USER_ENTERED`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          values: allValues
-        })
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`Data write failed with HTTP ${response.status}`);
-        }
-        return response.json();
-      })
-      .then(() => {
-        log(`Pushed ${scrapedLeads.length} leads to your Google Sheet!`, 'success');
-        log('Opening spreadsheet in new tab...', 'info');
+    const tsvContent = rows.join('\n');
 
-        // 5. Open spreadsheet in a new tab
-        chrome.tabs.create({ url: spreadsheetUrl });
-      });
-    })
-    .catch(error => {
-      log(`Google Sheets API Error: ${error.message}`, 'error');
-      console.error(error);
-    })
-    .finally(() => {
-      resetExportSheetsButton();
-    });
-  });
+    // 2. Write to System Clipboard
+    await navigator.clipboard.writeText(tsvContent);
+    log('Leads successfully copied to clipboard in Excel/Sheets format!', 'success');
+    log('Opening a new Google Sheet tab...', 'info');
+    log('👉 Click on cell A1 and press CMD+V (Mac) or CTRL+V (Windows/Linux) to paste.', 'warn');
+
+    // 3. Open a new Google Sheet tab (sheets.new)
+    chrome.tabs.create({ url: 'https://sheets.new' });
+
+  } catch (err) {
+    log(`Failed to copy to clipboard: ${err.message}`, 'error');
+    console.error(err);
+  } finally {
+    resetExportSheetsButton();
+  }
 });
 
 function resetExportSheetsButton() {
   btnExportSheets.disabled = false;
-  btnExportSheets.innerHTML = '<span>📊</span> Google Sheets';
+  btnExportSheets.innerHTML = '<span>📊</span> Copy to Sheets';
 }
 
 // Add new lead and initiate email scraper
