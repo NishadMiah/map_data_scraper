@@ -490,18 +490,23 @@
         <button id="btnStop" class="btn-danger" style="display: none;">
           <span class="btn-icon">■</span> Stop Scraping
         </button>
-        
         <div class="button-group-row">
           <button id="btnExport" class="btn-secondary" disabled>
             <span>📥</span> Export CSV
+          </button>
+          <button id="btnExportExcel" class="btn-secondary" disabled>
+            <span>📝</span> Download Excel
+          </button>
+        </div>
+        
+        <div class="button-group-row">
+          <button id="btnExportSheets" class="btn-secondary" disabled style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); color: var(--success); font-size: 0.8rem; padding: 10px 8px;">
+            <span>📊</span> Google Sheets
           </button>
           <button id="btnReset" class="btn-secondary">
             <span>🔄</span> Clear
           </button>
         </div>
-        <button id="btnExportSheets" class="btn-secondary" disabled style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); color: var(--success);">
-          <span>📊</span> Export to Google Sheets
-        </button>
       </div>
     </div>
 

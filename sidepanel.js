@@ -8,6 +8,7 @@ const connectionText = document.getElementById('connectionText');
 const btnStart = document.getElementById('btnStart');
 const btnStop = document.getElementById('btnStop');
 const btnExport = document.getElementById('btnExport');
+const btnExportExcel = document.getElementById('btnExportExcel');
 const btnExportSheets = document.getElementById('btnExportSheets');
 const btnReset = document.getElementById('btnReset');
 const statLeads = document.getElementById('statLeads');
@@ -165,6 +166,7 @@ btnReset.addEventListener('click', () => {
   previewPlaceholder.style.display = 'block';
   previewList.appendChild(previewPlaceholder);
   btnExport.disabled = true;
+  btnExportExcel.disabled = true;
   btnExportSheets.disabled = true;
   terminalLog.innerHTML = '';
   log("Dashboard reset complete. Ready to scrape.", "info");
@@ -174,7 +176,7 @@ btnReset.addEventListener('click', () => {
 btnExport.addEventListener('click', () => {
   if (scrapedLeads.length === 0) return;
   
-  const headers = ['Name', 'Phone', 'Website', 'Emails', 'Maps Link'];
+  const headers = ['Name', 'Phone', 'Website', 'Emails', 'Address', 'Maps Link'];
   const csvRows = [headers.join(',')];
   
   for (const lead of scrapedLeads) {
@@ -183,12 +185,14 @@ btnExport.addEventListener('click', () => {
       escapeCSVValue(lead.phone),
       escapeCSVValue(lead.website),
       escapeCSVValue(lead.emails.join('; ')),
+      escapeCSVValue(lead.address),
       escapeCSVValue(lead.mapsUrl)
     ];
     csvRows.push(row.join(','));
   }
   
-  const csvContent = csvRows.join('\n');
+  // Prepend \ufeff for Excel to recognize UTF-8 encoding immediately
+  const csvContent = '\ufeff' + csvRows.join('\n');
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   
@@ -208,6 +212,59 @@ function escapeCSVValue(val) {
   if (val === undefined || val === null) return '""';
   let str = String(val).replace(/"/g, '""');
   return `"${str}"`;
+}
+
+// Export leads to offline Excel file (.xls)
+btnExportExcel.addEventListener('click', () => {
+  if (scrapedLeads.length === 0) return;
+  
+  // HTML/XML template for Excel formatting
+  let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">`;
+  html += `<head><meta charset="utf-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Leads</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head>`;
+  html += `<body><table border="1">`;
+  
+  // Headers with a sleek modern design (matching style panel theme)
+  html += `<thead style="background-color: #6366f1; color: #ffffff; font-weight: bold;"><tr>`;
+  html += `<th>Name</th><th>Phone</th><th>Website</th><th>Emails</th><th>Address</th><th>Maps URL</th>`;
+  html += `</tr></thead>`;
+  
+  // Rows
+  html += `<tbody>`;
+  for (const lead of scrapedLeads) {
+    html += `<tr>`;
+    html += `<td>${escapeHtml(lead.name)}</td>`;
+    html += `<td>${escapeHtml(lead.phone || 'N/A')}</td>`;
+    html += `<td>${escapeHtml(lead.website || 'N/A')}</td>`;
+    html += `<td>${escapeHtml(lead.emails.join(', ') || 'N/A')}</td>`;
+    html += `<td>${escapeHtml(lead.address || 'N/A')}</td>`;
+    html += `<td>${escapeHtml(lead.mapsUrl || '')}</td>`;
+    html += `</tr>`;
+  }
+  html += `</tbody></table></body></html>`;
+  
+  const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  link.setAttribute('download', 'gmaps_leads.xls');
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  
+  log(`Successfully exported ${scrapedLeads.length} leads to gmaps_leads.xls`, 'success');
+});
+
+// HTML escaping helper
+function escapeHtml(text) {
+  if (text === undefined || text === null) return '';
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 // Export leads to Google Sheets via Google Sheets API (OAuth2)
@@ -265,12 +322,13 @@ btnExportSheets.addEventListener('click', () => {
       btnExportSheets.innerHTML = '<span>⏳</span> Appending rows...';
 
       // 3. Prepare dataset
-      const headerRow = ['Name', 'Phone', 'Website', 'Emails', 'Maps URL'];
+      const headerRow = ['Name', 'Phone', 'Website', 'Emails', 'Address', 'Maps URL'];
       const valueRows = scrapedLeads.map(lead => [
         lead.name || '',
         lead.phone || 'N/A',
         lead.website || 'N/A',
         Array.isArray(lead.emails) ? lead.emails.join(', ') : 'N/A',
+        lead.address || 'N/A',
         lead.mapsUrl || ''
       ]);
       const allValues = [headerRow, ...valueRows];
@@ -312,7 +370,7 @@ btnExportSheets.addEventListener('click', () => {
 
 function resetExportSheetsButton() {
   btnExportSheets.disabled = false;
-  btnExportSheets.innerHTML = '<span>📊</span> Export to Google Sheets';
+  btnExportSheets.innerHTML = '<span>📊</span> Google Sheets';
 }
 
 // Add new lead and initiate email scraper
@@ -336,6 +394,7 @@ function handleNewLead(lead) {
   // Update leads count
   statLeads.textContent = scrapedLeads.length;
   btnExport.disabled = false;
+  btnExportExcel.disabled = false;
   btnExportSheets.disabled = false;
   
   // Hide preview placeholder
@@ -350,6 +409,10 @@ function handleNewLead(lead) {
       <span class="lead-name">${newLead.name}</span>
     </div>
     <div class="lead-body">
+      <div class="lead-item">
+        <span class="lead-icon">📍</span>
+        <span class="lead-address" style="word-break: break-word;">${newLead.address || 'N/A'}</span>
+      </div>
       <div class="lead-item">
         <span class="lead-icon">📞</span>
         <span class="lead-phone">${newLead.phone || 'N/A'}</span>

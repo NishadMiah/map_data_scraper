@@ -209,6 +209,40 @@ function scrapeCurrentPage() {
         }
       }
       
+      // Extract Address
+      let address = 'N/A';
+      const details = cardContainer.querySelectorAll('.W4Efsd');
+      const serviceKeywords = ['dine-in', 'takeout', 'delivery', 'in-store', 'pickup', 'no-contact', 'drive-through', 'same-day'];
+      for (let i = 1; i < details.length; i++) {
+        const spans = details[i].querySelectorAll('span');
+        let potentialAddress = '';
+        for (const span of spans) {
+          const text = span.textContent.trim();
+          const lowerText = text.toLowerCase();
+          const isServiceOption = serviceKeywords.some(keyword => lowerText.includes(keyword));
+          
+          if (text && 
+              text !== '·' && 
+              !isServiceOption &&
+              !text.startsWith('Open') && 
+              !text.startsWith('Closed') && 
+              !text.startsWith('Closes') && 
+              !text.startsWith('Opens') &&
+              !text.includes('opens at') &&
+              !text.includes('closes at') &&
+              !text.match(/\(?\d{2,5}\)?[-.\s]?\d{3,5}[-.\s]?\d{3,6}/)) {
+            if (text.length > 5) {
+              potentialAddress = text;
+              break;
+            }
+          }
+        }
+        if (potentialAddress) {
+          address = potentialAddress;
+          break;
+        }
+      }
+      
       // Relay extracted lead details back to sidepanel.js
       chrome.runtime.sendMessage({
         type: 'LEAD_FOUND',
@@ -216,6 +250,7 @@ function scrapeCurrentPage() {
           name,
           phone,
           website,
+          address,
           mapsUrl
         }
       });
