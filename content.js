@@ -39,48 +39,77 @@ function startScraping() {
     message: 'Scraping engine initialized. Locating feed container...' 
   });
   
-  // Run initial extraction
-  const initialCount = scrapeCurrentPage();
-  lastCount = initialCount;
-  
-  // Run periodic scroll and parse loop
-  scrapeInterval = setInterval(() => {
+  let retries = 0;
+  const maxRetries = 5;
+
+  function tryStart() {
     const feed = document.querySelector('div[role="feed"]');
     
     if (!feed) {
-      chrome.runtime.sendMessage({ 
-        type: 'SCRAPE_STATUS', 
-        status: 'error', 
-        message: 'Google Maps feed container not found. Perform a search first.' 
-      });
-      stopScraping();
-      return;
-    }
-    
-    // Scroll the feed container down to trigger lazy loading of more elements
-    feed.scrollBy(0, 800);
-    
-    // Scrape listings visible in DOM
-    const currentCount = scrapeCurrentPage();
-    
-    // Check if new listings were discovered
-    if (currentCount === lastCount) {
-      noNewItemsTicks++;
-      
-      const isEnd = checkEndOfListText();
-      if (isEnd || noNewItemsTicks >= MAX_NO_NEW_TICKS) {
+      if (retries < maxRetries) {
+        retries++;
         chrome.runtime.sendMessage({ 
           type: 'SCRAPE_STATUS', 
-          status: 'finished', 
-          message: `Scrape complete! Extracted ${currentCount} business listings.` 
+          status: 'scrolling', 
+          message: `Locating feed container (retry ${retries}/${maxRetries})...` 
+        });
+        setTimeout(tryStart, 1000);
+      } else {
+        chrome.runtime.sendMessage({ 
+          type: 'SCRAPE_STATUS', 
+          status: 'error', 
+          message: 'Google Maps feed container not found. Make sure you perform a search first.' 
         });
         stopScraping();
       }
-    } else {
-      noNewItemsTicks = 0;
-      lastCount = currentCount;
+      return;
     }
-  }, 2500); // 2.5-second scan-and-scroll cycle
+    
+    // Run initial extraction
+    const initialCount = scrapeCurrentPage();
+    lastCount = initialCount;
+    
+    // Run periodic scroll and parse loop
+    scrapeInterval = setInterval(() => {
+      const currentFeed = document.querySelector('div[role="feed"]');
+      
+      if (!currentFeed) {
+        chrome.runtime.sendMessage({ 
+          type: 'SCRAPE_STATUS', 
+          status: 'error', 
+          message: 'Feed container lost. Scraping stopped.' 
+        });
+        stopScraping();
+        return;
+      }
+      
+      // Scroll the feed container down to trigger lazy loading of more elements
+      currentFeed.scrollBy(0, 800);
+      
+      // Scrape listings visible in DOM
+      const currentCount = scrapeCurrentPage();
+      
+      // Check if new listings were discovered
+      if (currentCount === lastCount) {
+        noNewItemsTicks++;
+        
+        const isEnd = checkEndOfListText();
+        if (isEnd || noNewItemsTicks >= MAX_NO_NEW_TICKS) {
+          chrome.runtime.sendMessage({ 
+            type: 'SCRAPE_STATUS', 
+            status: 'finished', 
+            message: `Scrape complete! Extracted ${currentCount} business listings.` 
+          });
+          stopScraping();
+        }
+      } else {
+        noNewItemsTicks = 0;
+        lastCount = currentCount;
+      }
+    }, 2500); // 2.5-second scan-and-scroll cycle
+  }
+
+  tryStart();
 }
 
 /**
